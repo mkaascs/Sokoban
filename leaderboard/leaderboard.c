@@ -69,8 +69,8 @@ bool save_leaderboard() {
             user->username, user->password, user->completed_levels);
 
         for (int level = 0; level < LEVEL_COUNT; level++)
-            length += snprintf(data + length, sizeof(data), " %d %d",
-                user->level_times[index], user->level_moves[index]);
+            length += snprintf(data + length, sizeof(data) - length, " %d %d",
+                user->level_times[level], user->level_moves[level]);
 
         length += snprintf(data + length, sizeof(data), " %.2f",
             user->total_score);

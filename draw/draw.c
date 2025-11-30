@@ -121,7 +121,9 @@ void start_draw() {
 }
 
 void exit_game() {
+    printf("hyi1\n");
     save_leaderboard();
+    printf("hyi2\n");
     free_leaderboard();
     levels_free();
     batch_free();
@@ -222,11 +224,12 @@ void update_tutorial_animation();
 void draw_tutorial();
 
 float recalculate_total_score(const User user) {
+    const Level level = get_current_level();
     float totalScore = 0.0;
     for (int i = 1; i < LEVEL_COUNT; i++) {
         if (user.level_moves[i] > 0 && user.level_times[i] > 0) {
-            totalScore += ((100.0 / (float)user.level_moves[i]) +
-                          (100.0 / (float)user.level_times[i])) * (i + 1);
+            totalScore += ((100.0 / 8 * level.walls.columns / (float)user.level_moves[i]) +
+                          (100.0 / 8 * level.walls.columns / (float)user.level_times[i])) * (i + 1);
         }
     }
 
@@ -256,8 +259,8 @@ void update_level(const int dx, const int dy) {
     time_taken = time_taken < 1 ? 1 : time_taken;
 
     const float level_score =
-        (100.0 / (float)state.move_count +
-        100.0 / time_taken) * (level.number + 1);
+        (100.0 / 8 * level.walls.columns / (float)state.move_count +
+        100.0 / 8 * level.walls.columns / time_taken) * (level.number + 1);
 
     bool need_update = (user->completed_levels & 1u << level.number) == 0
         || state.move_count < user->level_moves[level.number]
