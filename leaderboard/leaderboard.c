@@ -93,8 +93,8 @@ bool save_leaderboard() {
     return true;
 }
 
-UserArray get_users() {
-    return users;
+const UserArray* get_users() {
+    return &users;
 }
 
 int find_user(const char* username) {

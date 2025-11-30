@@ -68,6 +68,8 @@
 #define QUIT_LOGIN_BUTTON_WIDTH 0.2
 #define QUIT_LOGIN_BUTTON_HEIGHT 0.1
 
+#define TARGET_FRAME_TIME_MS 16
+
 typedef enum {
     LOGIN,
     GAME,
@@ -83,12 +85,13 @@ const int tutorialMoveCount = 3;
 char current_username[MAX_USERNAME + 1] = "";
 char current_password[MAX_PASSWORD + 1] = "";
 char errorMessage[100] = "";
-bool isLoginScreen = true;
-bool isRegisterMode = false;
-bool isUsernameEntered = false;
-bool isFirstGame = false;
-int passwordStrength = 0;
-DisplayMode currentMode = LOGIN;
+bool is_login_screen = true;
+bool is_register_mode = false;
+bool is_username_entered = false;
+bool is_first_game = false;
+int password_strength = 0;
+DisplayMode current_mode = LOGIN;
+User* current_user = NULL;
 
 void draw();
 void reshape(int width, int height);
@@ -108,11 +111,17 @@ void init_draw(int argc, char** argv) {
 
     font_init();
 
+    glutTimerFunc(TARGET_FRAME_TIME_MS, timer_redisplay, 0);
     glutDisplayFunc(draw);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
     glutSpecialFunc(special_keys);
     glutMouseFunc(mouse);
+}
+
+void timer_redisplay(int value) {
+    glutPostRedisplay();
+    glutTimerFunc(TARGET_FRAME_TIME_MS, timer_redisplay, 0);
 }
 
 void start_draw() {
@@ -121,24 +130,47 @@ void start_draw() {
 }
 
 void exit_game() {
-    printf("hyi1\n");
+    printf("save_leaderboard()");
     save_leaderboard();
-    printf("hyi2\n");
+    printf("free_leaderboard()");
     free_leaderboard();
+    printf("levels_free()");
     levels_free();
+    printf("batch_free()");
     batch_free();
+    printf("profile_print()");
     profile_print();
     exit(0);
 }
 
 static void draw_rectangle(const float x, const float y, const float width, const float height, const float r, const float g, const float b) {
-    profile_start();
+    profile_start("draw_rectangle()");
     batch_add_rect(x, y, width, height, r, g, b);
-    profile_end("draw_rectangle()");
+    profile_end();
+}
+
+void draw_text(float x_ndc, float y_ndc, const char* text, float r, float g, float b) {
+    profile_start("draw_text()");
+    draw_text_batch(x_ndc,y_ndc,text,r,g,b);
+    profile_end();
+}
+
+bool start_game_prf(const int level) {
+    profile_start("start_game()");
+    bool result = start_game(level);
+    profile_end();
+    return result;
+}
+
+bool move_player_prf(const int dx, const int dy) {
+    profile_start("move_player()");
+    bool result = move_player(dx, dy);
+    profile_end();
+    return result;
 }
 
 static void draw_cell(const float x, const float y, const float cellWidth, const float cellHeight, const EntityType type) {
-    profile_start();
+    profile_start("draw_cell()");
 
     float r, g, b;
     switch (type) {
@@ -152,7 +184,7 @@ static void draw_cell(const float x, const float y, const float cellWidth, const
     }
 
     batch_add_rect(x, y, cellWidth, cellHeight, r, g, b);
-    profile_end("draw_cell()");
+    profile_end();
 }
 
 static int evaluate_password_strength(const char* password) {
@@ -224,12 +256,12 @@ void update_tutorial_animation();
 void draw_tutorial();
 
 float recalculate_total_score(const User user) {
-    const Level level = get_current_level();
+    const Level* level = get_current_level();
     float totalScore = 0.0;
     for (int i = 1; i < LEVEL_COUNT; i++) {
         if (user.level_moves[i] > 0 && user.level_times[i] > 0) {
-            totalScore += ((100.0 / 8 * level.walls.columns / (float)user.level_moves[i]) +
-                          (100.0 / 8 * level.walls.columns / (float)user.level_times[i])) * (i + 1);
+            totalScore += ((100.0 / 8 * level->walls.columns / (float)user.level_moves[i]) +
+                          (100.0 / 8 * level->walls.columns / (float)user.level_times[i])) * (i + 1);
         }
     }
 
@@ -238,48 +270,45 @@ float recalculate_total_score(const User user) {
 
 // Обновление уровня void update_level(int dx, int dy) {
 void update_level(const int dx, const int dy) {
-    profile_start();
-    if (!move_player(dx, dy))
+    profile_start("update_level()");
+    if (!move_player_prf(dx, dy)) {
+        profile_end();
         return;
+    }
 
-    const GameState state = get_game_state();
-    const Level level = get_current_level();
+    const GameState* state = get_game_state();
+    const Level* level = get_current_level();
 
-    if (!state.is_level_completed)
+    if (!state->is_level_completed) {
+        profile_end();
         return;
+    }
 
-    const int index = find_user(current_username);
-    if (index == -1)
-        return;
-
-    const UserArray users = get_users();
-    User* user = &users.users[index];
-
-    float time_taken = state.end_time - state.start_time / 1000;
+    float time_taken = state->end_time - state->start_time / 1000;
     time_taken = time_taken < 1 ? 1 : time_taken;
 
     const float level_score =
-        (100.0 / 8 * level.walls.columns / (float)state.move_count +
-        100.0 / 8 * level.walls.columns / time_taken) * (level.number + 1);
+        (100.0 / 8 * level->walls.columns / (float)state->move_count +
+        100.0 / 8 * level->walls.columns / time_taken) * (level->number + 1);
 
-    bool need_update = (user->completed_levels & 1u << level.number) == 0
-        || state.move_count < user->level_moves[level.number]
-        || (state.move_count == user->level_moves[level.number] && time_taken < user->level_times[level.number]);
+    bool need_update = (current_user->completed_levels & 1u << level->number) == 0
+        || state->move_count < current_user->level_moves[level->number]
+        || (state->move_count == current_user->level_moves[level->number] && time_taken < current_user->level_times[level->number]);
 
     if (need_update) {
-        user->level_moves[level.number] = state.move_count;
-        user->level_times[level.number] = time_taken;
+        current_user->level_moves[level->number] = state->move_count;
+        current_user->level_times[level->number] = time_taken;
 
-        user->total_score = recalculate_total_score(*user);
-        update_score(current_username, user->total_score);
+        current_user->total_score = recalculate_total_score(*current_user);
+        update_score(current_username, current_user->total_score);
         printf("Очки за уровень %d: %.2f, Общие очки: %.2f\n",
-               level.number, level_score, user->total_score);
+               level->number, level_score, current_user->total_score);
     }
 
-    user->completed_levels |= 1u << level.number;
+    current_user->completed_levels |= 1u << level->number;
 
-    profile_end("update_level()");
-    glutPostRedisplay();
+    profile_end();
+    //timer_redisplay(0);
 }
 
 // Отрисовка меню игры
@@ -295,13 +324,13 @@ void draw_menu() {
     draw_rectangle(CONTROLS_BUTTON_X, CONTROLS_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
     draw_rectangle(QUIT_BUTTON_X, QUIT_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
 
-    draw_text_batch(NEXT_BUTTON_X + 0.05, NEXT_BUTTON_Y + 0.05, "Next Level", 1.0, 1.0, 1.0);
-    draw_text_batch(PREV_BUTTON_X + 0.05, PREV_BUTTON_Y + 0.05, "Previous Level", 1.0, 1.0, 1.0);
-    draw_text_batch(LEVEL_BUTTON_X + 0.05, LEVEL_BUTTON_Y + 0.05, "Choose Level", 1.0, 1.0, 1.0);
-    draw_text_batch(RESTART_BUTTON_X + 0.05, RESTART_BUTTON_Y + 0.05, "Restart Level", 1.0, 1.0, 1.0);
-    draw_text_batch(LEADERBOARD_BUTTON_X + 0.05, LEADERBOARD_BUTTON_Y + 0.05, "Leaderboard", 1.0, 1.0, 1.0);
-    draw_text_batch(CONTROLS_BUTTON_X + 0.05, CONTROLS_BUTTON_Y + 0.05, "Controls", 1.0, 1.0, 1.0);
-    draw_text_batch(QUIT_BUTTON_X + 0.05, QUIT_BUTTON_Y + 0.05, "Quit", 1.0, 1.0, 1.0);
+    draw_text(NEXT_BUTTON_X + 0.05, NEXT_BUTTON_Y + 0.05, "Next Level", 1.0, 1.0, 1.0);
+    draw_text(PREV_BUTTON_X + 0.05, PREV_BUTTON_Y + 0.05, "Previous Level", 1.0, 1.0, 1.0);
+    draw_text(LEVEL_BUTTON_X + 0.05, LEVEL_BUTTON_Y + 0.05, "Choose Level", 1.0, 1.0, 1.0);
+    draw_text(RESTART_BUTTON_X + 0.05, RESTART_BUTTON_Y + 0.05, "Restart Level", 1.0, 1.0, 1.0);
+    draw_text(LEADERBOARD_BUTTON_X + 0.05, LEADERBOARD_BUTTON_Y + 0.05, "Leaderboard", 1.0, 1.0, 1.0);
+    draw_text(CONTROLS_BUTTON_X + 0.05, CONTROLS_BUTTON_Y + 0.05, "Controls", 1.0, 1.0, 1.0);
+    draw_text(QUIT_BUTTON_X + 0.05, QUIT_BUTTON_Y + 0.05, "Quit", 1.0, 1.0, 1.0);
 
     batch_flush();
 }
@@ -315,14 +344,14 @@ void draw_game() {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    const GameState state = get_game_state();
+    const GameState* state = get_game_state();
     batch_reset();
 
     draw_rectangle(GAME_RECT_X, GAME_RECT_Y, GAME_RECT_WIDTH, GAME_RECT_HEIGHT, 0.999, 0.844, 0.600);
 
-    const Level level = get_current_level();
-    const int rows = level.walls.rows;
-    const int columns = level.walls.columns;
+    const Level* level = get_current_level();
+    const int rows = level->walls.rows;
+    const int columns = level->walls.columns;
 
     const float cellWidth = GAME_RECT_WIDTH / columns;
     const float cellHeight = GAME_RECT_HEIGHT / rows;
@@ -335,40 +364,34 @@ void draw_game() {
         }
     }
 
-
-    if (state.is_level_completed) {
-        draw_text_batch(-0.2, 0.0, "LEVEL COMPLETE!", 0.0, 1.0, 0.0);
+    if (state->is_level_completed) {
+        draw_text(-0.2, 0.0, "LEVEL COMPLETE!", 0.0, 1.0, 0.0);
     }
 
-    const int displayTime = (state.is_level_completed && state.end_time != 0)
-        ? (state.end_time - state.start_time) / 1000
-        : (get_time_ms() - state.start_time) / 1000;
+    const int displayTime = (state->is_level_completed && state->end_time != 0)
+        ? (state->end_time - state->start_time) / 1000
+        : (get_time_ms() - state->start_time) / 1000;
 
     const int hours = displayTime / 3600;
     const int minutes = (displayTime % 3600) / 60;
     const int seconds = displayTime % 60;
     char timerText[20];
     snprintf(timerText, sizeof(timerText), "Time: %02d:%02d:%02d", hours, minutes, seconds);
-    draw_text_batch(-0.2, 0.8, timerText, 1.0, 1.0, 1.0);
+    draw_text(-0.2, 0.8, timerText, 1.0, 1.0, 1.0);
 
     char movesText[20];
-    snprintf(movesText, sizeof(movesText), "Moves: %d", state.move_count);
-    draw_text_batch(-0.2, 0.75, movesText, 1.0, 1.0, 1.0);
+    snprintf(movesText, sizeof(movesText), "Moves: %d", state->move_count);
+    draw_text(-0.2, 0.75, movesText, 1.0, 1.0, 1.0);
 
     if (strlen(current_username) > 0) {
-        const int index = find_user(current_username);
-        if (index != -1) {
-            User* current_user = &get_users().users[index];
-            current_user->total_score = recalculate_total_score(*current_user);
-            char scoreText[30];
-            snprintf(scoreText, sizeof(scoreText), "Score: %.2f", current_user->total_score);
-            draw_text_batch(-0.2, 0.70, scoreText, 1.0, 1.0, 1.0);
-        }
+        char scoreText[30];
+        snprintf(scoreText, sizeof(scoreText), "Score: %.2f", current_user->total_score);
+        draw_text(-0.2, 0.70, scoreText, 1.0, 1.0, 1.0);
     }
 
-    draw_text_batch(0.6, 0.8, current_username, 1.0, 1.0, 0.0);
-
+    draw_text(0.6, 0.8, current_username, 1.0, 1.0, 0.0);
     batch_flush();
+
     draw_menu();
     glutSwapBuffers();
 }
@@ -386,45 +409,46 @@ void draw_login() {
 
     draw_rectangle(-0.5, -0.5, 1.0, 1.0, 0.2, 0.2, 0.2);
 
-    if (isUsernameEntered && isRegisterMode) {
-        float r, g;
-        switch (passwordStrength) {
+    if (is_username_entered && is_register_mode) {
+        float r = 0, g = 0;
+        switch (password_strength) {
             case 0:
             case 1: r = 1.0; g = 0.0; break;
             case 2: r = 1.0; g = 0.5; break;
             case 3: r = 1.0; g = 1.0; break;
             case 4:
             case 5: r = 0.0; g = 1.0; break;
+            default: ;
         }
 
         draw_rectangle(PASSWORD_STRENGTH_X, PASSWORD_STRENGTH_Y, PASSWORD_STRENGTH_WIDTH, PASSWORD_STRENGTH_HEIGHT, r, g, 0.0);
 
         char strengthText[20];
-        snprintf(strengthText, sizeof(strengthText), "Strength: %d/5", passwordStrength);
-        draw_text_batch(PASSWORD_STRENGTH_X + 0.05, PASSWORD_STRENGTH_Y + 0.03, strengthText, 1.0, 1.0, 1.0);
+        snprintf(strengthText, sizeof(strengthText), "Strength: %d/5", password_strength);
+        draw_text(PASSWORD_STRENGTH_X + 0.05, PASSWORD_STRENGTH_Y + 0.03, strengthText, 1.0, 1.0, 1.0);
     }
 
     draw_rectangle(TOGGLE_BUTTON_X, TOGGLE_BUTTON_Y, TOGGLE_BUTTON_WIDTH, TOGGLE_BUTTON_HEIGHT, 0.5, 0.5, 0.5);
     draw_rectangle(QUIT_LOGIN_BUTTON_X, QUIT_LOGIN_BUTTON_Y, QUIT_LOGIN_BUTTON_WIDTH, QUIT_LOGIN_BUTTON_HEIGHT, 0.5, 0.5, 0.5);
 
-    draw_text_batch(-0.4, 0.4, isRegisterMode ? "Register" : "Login", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.4, 0.2, "ENTER YOUR USERNAME (just enter):", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.1, 0.2, current_username, 1.0, 1.0, 1.0);
-    draw_text_batch(-0.4, 0.0, isUsernameEntered ? "ENTER YOUR PASSWORD (just enter):" : "", 1.0, 1.0, 1.0);
+    draw_text(-0.4, 0.4, is_register_mode ? "Register" : "Login", 1.0, 1.0, 1.0);
+    draw_text(-0.4, 0.2, "ENTER YOUR USERNAME (just enter):", 1.0, 1.0, 1.0);
+    draw_text(-0.1, 0.2, current_username, 1.0, 1.0, 1.0);
+    draw_text(-0.4, 0.0, is_username_entered ? "ENTER YOUR PASSWORD (just enter):" : "", 1.0, 1.0, 1.0);
 
-    draw_text_batch(TOGGLE_BUTTON_X + 0.05, TOGGLE_BUTTON_Y + 0.05, "Toggle Mode", 1.0, 1.0, 1.0);
-    draw_text_batch(QUIT_LOGIN_BUTTON_X + 0.05, QUIT_LOGIN_BUTTON_Y + 0.05, "Quit", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.4, -0.3, "Enter: Next/Submit", 0.8, 0.8, 0.8);
-    draw_text_batch(-0.4, -0.6, "Username: 4-20 chars, Password: 8-20 chars", 0.8, 0.8, 0.8);
+    draw_text(TOGGLE_BUTTON_X + 0.05, TOGGLE_BUTTON_Y + 0.05, "Toggle Mode", 1.0, 1.0, 1.0);
+    draw_text(QUIT_LOGIN_BUTTON_X + 0.05, QUIT_LOGIN_BUTTON_Y + 0.05, "Quit", 1.0, 1.0, 1.0);
+    draw_text(-0.4, -0.3, "Enter: Next/Submit", 0.8, 0.8, 0.8);
+    draw_text(-0.4, -0.6, "Username: 4-20 chars, Password: 8-20 chars", 0.8, 0.8, 0.8);
 
     char maskedPassword[MAX_PASSWORD];
     const int password_len = strlen(current_password);
     memset(maskedPassword, '*', password_len);
     maskedPassword[password_len] = '\0';
-    draw_text_batch(-0.1, 0.0, isUsernameEntered ? maskedPassword : "", 1.0, 1.0, 1.0);
+    draw_text(-0.1, 0.0, is_username_entered ? maskedPassword : "", 1.0, 1.0, 1.0);
 
     if (strlen(errorMessage) > 0) {
-        draw_text_batch(-0.4, -0.5, errorMessage, 1.0, 0.0, 0.0);
+        draw_text(-0.4, -0.5, errorMessage, 1.0, 0.0, 0.0);
     }
 
     batch_flush();
@@ -448,13 +472,13 @@ void draw_level_selector() {
         draw_rectangle(x, y, LEVEL_SELECT_BUTTON_WIDTH, LEVEL_SELECT_BUTTON_HEIGHT, 0.5, 0.5, 0.5);
         char levelText[4];
         snprintf(levelText, sizeof(levelText), "%d", i + 1);
-        draw_text_batch(x + 0.03f, y + 0.05f, levelText, 1.0, 1.0, 1.0);
+        draw_text(x + 0.03f, y + 0.05f, levelText, 1.0, 1.0, 1.0);
     }
 
     draw_rectangle(-0.1, -0.8, 0.2, 0.1, 0.5, 0.5, 0.5);
 
-    draw_text_batch(-0.9, 0.9, "SELECT LEVEL:", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.05, -0.75, "Back", 1.0, 1.0, 1.0);
+    draw_text(-0.9, 0.9, "SELECT LEVEL:", 1.0, 1.0, 1.0);
+    draw_text(-0.05, -0.75, "Back", 1.0, 1.0, 1.0);
 
     batch_flush();
     glutSwapBuffers();
@@ -471,16 +495,19 @@ void draw_leaderboard() {
     draw_rectangle(-1.0f, -1.0f, 2.0f, 2.0f, 0.0f, 0.0f, 0.0f);
     draw_rectangle(-0.1f, -0.8f, 0.2f, 0.1f, 0.5f, 0.5f, 0.5f);
 
-    draw_text_batch(-0.9, 0.9, "LEADERBOARD:", 1.0, 1.0, 1.0);
-    const UserArray users = get_users();
-    const int count = users.length > 10 ? 10 : users.length;
+    draw_text(-0.9, 0.9, "LEADERBOARD:", 1.0, 1.0, 1.0);
+    profile_start("get_users()");
+    const UserArray* users = get_users();
+    profile_end();
+
+    const int count = users->length > 10 ? 10 : users->length;
     for (int index = 0; index < count; index++) {
         char entry[50];
-        snprintf(entry, sizeof(entry), "%d. %s - %.2f", index + 1, users.users[index].username, users.users[index].total_score);
-        draw_text_batch(-0.8, 0.7 - index * 0.1, entry, 1.0, 1.0, 1.0);
+        snprintf(entry, sizeof(entry), "%d. %s - %.2f", index + 1, users->users[index].username, users->users[index].total_score);
+        draw_text(-0.8, 0.7 - index * 0.1, entry, 1.0, 1.0, 1.0);
     }
 
-    draw_text_batch(-0.05, -0.75, "Back", 1.0, 1.0, 1.0);
+    draw_text(-0.05, -0.75, "Back", 1.0, 1.0, 1.0);
 
     batch_flush();
     glutSwapBuffers();
@@ -498,14 +525,14 @@ void draw_tutorial() {
     batch_reset();
     draw_rectangle(GAME_RECT_X, GAME_RECT_Y, GAME_RECT_WIDTH, GAME_RECT_HEIGHT, 0.999, 0.844, 0.600);
 
-    const Level level = get_current_level();
-    const int rows = level.walls.rows;
-    const int columns = level.walls.columns;
+    const Level* level = get_current_level();
+    const int rows = level->walls.rows;
+    const int columns = level->walls.columns;
 
     const float cellWidth = GAME_RECT_WIDTH / columns;
     const float cellHeight = GAME_RECT_HEIGHT / rows;
 
-    const GameState state = get_game_state();
+    const GameState* state = get_game_state();
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < columns; j++) {
             const float x = GAME_RECT_X + j * cellWidth;
@@ -515,7 +542,7 @@ void draw_tutorial() {
     }
 
     char hint[50];
-    switch (state.move_count) {
+    switch (state->move_count) {
         case 0:
             snprintf(hint, sizeof(hint), "Press D or Right Arrow to move right");
             break;
@@ -530,8 +557,8 @@ void draw_tutorial() {
             break;
     }
 
-    draw_text_batch(-0.4, 0.8, "Welcome to Sokoban! Watch how to play:", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.4, 0.7, hint, 0.0, 1.0, 0.0);
+    draw_text(-0.4, 0.8, "Welcome to Sokoban! Watch how to play:", 1.0, 1.0, 1.0);
+    draw_text(-0.4, 0.7, hint, 0.0, 1.0, 0.0);
 
     batch_flush();
 
@@ -540,24 +567,25 @@ void draw_tutorial() {
 
 // Обновление анимации
 void update_tutorial_animation() {
-    const GameState game_state = get_game_state();
-    if (game_state.move_count >= tutorialMoveCount) {
-        currentMode = GAME;
-        isFirstGame = false;
-        start_game(1);
-        glutPostRedisplay();
+    const GameState* game_state = get_game_state();
+    if (game_state->move_count >= tutorialMoveCount) {
+        current_mode = GAME;
+        is_first_game = false;
+        start_game_prf(1);
+        //timer_redisplay(0);
         return;
     }
 
-    const char move = tutorialMoves[game_state.move_count];
+    const char move = tutorialMoves[game_state->move_count];
     switch (move) {
-        case 'w': case 'W': move_player(0, 1); break;
-        case 's': case 'S': move_player(0, -1); break;
-        case 'a': case 'A': move_player(-1, 0); break;
-        case 'd': case 'D': move_player(1, 0); break;
+        case 'w': case 'W': move_player_prf(0, 1); break;
+        case 's': case 'S': move_player_prf(0, -1); break;
+        case 'a': case 'A': move_player_prf(-1, 0); break;
+        case 'd': case 'D': move_player_prf(1, 0); break;
+        default: ;
     }
 
-    glutPostRedisplay();
+    //timer_redisplay(0);
     glutTimerFunc(1500, update_tutorial_animation, 0);
 }
 
@@ -579,24 +607,24 @@ void draw_controls() {
     draw_rectangle(-0.6, -0.3, 0.2, 0.1, 0.0, 0.8, 0.0);
     draw_rectangle(-0.1, -0.8, 0.2, 0.1, 0.5, 0.5, 0.5);
 
-    draw_text_batch(-0.4, 0.8, "Controls", 1.0, 1.0, 1.0);
+    draw_text(-0.4, 0.8, "Controls", 1.0, 1.0, 1.0);
 
-    draw_text_batch(-0.55, 0.55, "W / Up Arrow", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.3, 0.55, ": Move Up", 1.0, 1.0, 1.0);
+    draw_text(-0.55, 0.55, "W / Up Arrow", 1.0, 1.0, 1.0);
+    draw_text(-0.3, 0.55, ": Move Up", 1.0, 1.0, 1.0);
 
-    draw_text_batch(-0.55, 0.35, "S / Down Arrow", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.3, 0.35, ": Move Down", 1.0, 1.0, 1.0);
+    draw_text(-0.55, 0.35, "S / Down Arrow", 1.0, 1.0, 1.0);
+    draw_text(-0.3, 0.35, ": Move Down", 1.0, 1.0, 1.0);
 
-    draw_text_batch(-0.55, 0.15, "A / Left Arrow", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.3, 0.15, ": Move Left", 1.0, 1.0, 1.0);
+    draw_text(-0.55, 0.15, "A / Left Arrow", 1.0, 1.0, 1.0);
+    draw_text(-0.3, 0.15, ": Move Left", 1.0, 1.0, 1.0);
 
-    draw_text_batch(-0.55, -0.05, "D / Right Arrow", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.3, -0.05, ": Move Right", 1.0, 1.0, 1.0);
+    draw_text(-0.55, -0.05, "D / Right Arrow", 1.0, 1.0, 1.0);
+    draw_text(-0.3, -0.05, ": Move Right", 1.0, 1.0, 1.0);
 
-    draw_text_batch(-0.55, -0.25, "Enter", 1.0, 1.0, 1.0);
-    draw_text_batch(-0.3, -0.25, ": Confirm / Submit", 1.0, 1.0, 1.0);
+    draw_text(-0.55, -0.25, "Enter", 1.0, 1.0, 1.0);
+    draw_text(-0.3, -0.25, ": Confirm / Submit", 1.0, 1.0, 1.0);
 
-    draw_text_batch(-0.05, -0.75, "Back", 1.0, 1.0, 1.0);
+    draw_text(-0.05, -0.75, "Back", 1.0, 1.0, 1.0);
 
 
     batch_flush();
@@ -606,36 +634,36 @@ void draw_controls() {
 // Главная функция отображения
 void draw() {
     glClear(GL_COLOR_BUFFER_BIT);
-    switch (currentMode) {
+    switch (current_mode) {
         case LOGIN:
-            profile_start();
+            profile_start("draw_login()");
             draw_login();
-            profile_end("draw_login()");
+            profile_end();
             break;
         case GAME:
-            profile_start();
+            profile_start("draw_game()");
             draw_game();
-            profile_end("draw_game()");
+            profile_end();
             break;
         case LEVEL_SELECTOR:
-            profile_start();
+            profile_start("draw_level_selector");
             draw_level_selector();
-            profile_end("draw_level_selector");
+            profile_end();
             break;
         case LEADERBOARD:
-            profile_start();
+            profile_start("draw_leaderboard()");
             draw_leaderboard();
-            profile_end("draw_leaderboard()");
+            profile_end();
             break;
         case TUTORIAL:
-            profile_start();
+            profile_start("draw_tutorial()");
             draw_tutorial();
-            profile_end("draw_tutorial()");
+            profile_end();
             break;
         case CONTROLS:
-            profile_start();
+            profile_start("draw_controls()");
             draw_controls();
-            profile_end("draw_controls()");
+            profile_end();
             break;
     }
 }
@@ -656,12 +684,12 @@ void mouse(int button, int state, int x, int y) {
         float glX = (float)x / glutGet(GLUT_WINDOW_WIDTH) * 2.0 - 1.0;
         float glY = -((float)y / glutGet(GLUT_WINDOW_HEIGHT) * 2.0 - 1.0);
 
-        Level level = get_current_level();
+        const Level* level = get_current_level();
 
-        if (currentMode == LOGIN) {
+        if (current_mode == LOGIN) {
             if (glX >= TOGGLE_BUTTON_X && glX <= TOGGLE_BUTTON_X + TOGGLE_BUTTON_WIDTH &&
                 glY >= TOGGLE_BUTTON_Y && glY <= TOGGLE_BUTTON_Y + TOGGLE_BUTTON_HEIGHT) {
-                isRegisterMode = !isRegisterMode;
+                is_register_mode = !is_register_mode;
                 strcpy(errorMessage, "");
             }
             else if (glX >= QUIT_LOGIN_BUTTON_X && glX <= QUIT_LOGIN_BUTTON_X + QUIT_LOGIN_BUTTON_WIDTH &&
@@ -670,63 +698,63 @@ void mouse(int button, int state, int x, int y) {
             }
         }
 
-        else if (currentMode == GAME) {
+        else if (current_mode == GAME) {
             if (glX >= NEXT_BUTTON_X && glX <= NEXT_BUTTON_X + BUTTON_WIDTH &&
-                glY >= NEXT_BUTTON_Y && glY <= NEXT_BUTTON_Y + BUTTON_HEIGHT && level.number < LEVEL_COUNT - 1) {
-                start_game(level.number + 1);
+                glY >= NEXT_BUTTON_Y && glY <= NEXT_BUTTON_Y + BUTTON_HEIGHT && level->number < LEVEL_COUNT - 1) {
+                start_game_prf(level->number + 1);
             }
             else if (glX >= PREV_BUTTON_X && glX <= PREV_BUTTON_X + BUTTON_WIDTH &&
-                     glY >= PREV_BUTTON_Y && glY <= PREV_BUTTON_Y + BUTTON_HEIGHT && level.number > 1) {
-                start_game(level.number - 1);
+                     glY >= PREV_BUTTON_Y && glY <= PREV_BUTTON_Y + BUTTON_HEIGHT && level->number > 1) {
+                start_game_prf(level->number - 1);
             }
             else if (glX >= LEVEL_BUTTON_X && glX <= LEVEL_BUTTON_X + BUTTON_WIDTH &&
                      glY >= LEVEL_BUTTON_Y && glY <= LEVEL_BUTTON_Y + BUTTON_HEIGHT) {
-                currentMode = LEVEL_SELECTOR;
+                current_mode = LEVEL_SELECTOR;
             }
             else if (glX >= RESTART_BUTTON_X && glX <= RESTART_BUTTON_X + BUTTON_WIDTH &&
                      glY >= RESTART_BUTTON_Y && glY <= RESTART_BUTTON_Y + BUTTON_HEIGHT) {
-                start_game(level.number);
+                start_game_prf(level->number);
             }
             else if (glX >= LEADERBOARD_BUTTON_X && glX <= LEADERBOARD_BUTTON_X + BUTTON_WIDTH &&
                      glY >= LEADERBOARD_BUTTON_Y && glY <= LEADERBOARD_BUTTON_Y + BUTTON_HEIGHT) {
-                currentMode = LEADERBOARD;
+                current_mode = LEADERBOARD;
             }
             else if (glX >= CONTROLS_BUTTON_X && glX <= CONTROLS_BUTTON_X + BUTTON_WIDTH &&
                      glY >= CONTROLS_BUTTON_Y && glY <= CONTROLS_BUTTON_Y + BUTTON_HEIGHT) {
-                currentMode = CONTROLS;
+                current_mode = CONTROLS;
             }
             else if (glX >= QUIT_BUTTON_X && glX <= QUIT_BUTTON_X + BUTTON_WIDTH &&
                      glY >= QUIT_BUTTON_Y && glY <= QUIT_BUTTON_Y + BUTTON_HEIGHT) {
                 exit_game();
             }
         }
-        else if (currentMode == LEVEL_SELECTOR) {
+        else if (current_mode == LEVEL_SELECTOR) {
             for (int i = 0; i < LEVEL_COUNT - 1; i++) {
                 float btnX = LEVEL_SELECT_BASE_X + (i % 5) * (LEVEL_SELECT_BUTTON_WIDTH + 0.05);
                 float btnY = LEVEL_SELECT_BASE_Y - (i / 5) * (LEVEL_SELECT_BUTTON_HEIGHT + 0.05);
                 if (glX >= btnX && glX <= btnX + LEVEL_SELECT_BUTTON_WIDTH &&
                     glY >= btnY && glY <= btnY + LEVEL_SELECT_BUTTON_HEIGHT) {
-                    start_game(i + 1);
-                    currentMode = GAME;
+                    start_game_prf(i + 1);
+                    current_mode = GAME;
                     break;
                 }
             }
             if (glX >= -0.1 && glX <= 0.1 && glY >= -0.8 && glY <= -0.7) {
-                currentMode = GAME;
+                current_mode = GAME;
             }
         }
-        else if (currentMode == LEADERBOARD) {
+        else if (current_mode == LEADERBOARD) {
             if (glX >= -0.1 && glX <= 0.1 && glY >= -0.8 && glY <= -0.7) {
-                currentMode = GAME;
+                current_mode = GAME;
             }
         }
-        else if (currentMode == CONTROLS) {
+        else if (current_mode == CONTROLS) {
             if (glX >= -0.1 && glX <= 0.1 && glY >= -0.8 && glY <= -0.7) {
-                currentMode = GAME;
+                current_mode = GAME;
             }
         }
 
-        glutPostRedisplay();
+        //timer_redisplay(0);
     }
 }
 
@@ -734,26 +762,26 @@ void mouse(int button, int state, int x, int y) {
 void start_sokoban() {
     levels_init();
     printf("Запуск игры для пользователя: %s\n", current_username);
-    if (isFirstGame) {
-        currentMode = TUTORIAL;
-        start_game(0);
+    if (is_first_game) {
+        current_mode = TUTORIAL;
+        start_game_prf(0);
         glutTimerFunc(1500, update_tutorial_animation, 0);
     } else {
-        currentMode = GAME;
-        start_game(1);
+        current_mode = GAME;
+        start_game_prf(1);
     }
-    glutPostRedisplay();
+    //timer_redisplay(0);
 }
 
 // Обработчик клавиш для авторизации
 void login_keyboard(unsigned char key, int x, int y) {
     if (key == 13) {
-        if (!isUsernameEntered) {
+        if (!is_username_entered) {
             int len = strlen(current_username);
             if (len < MIN_USERNAME || len > MAX_USERNAME - 1) {
                 snprintf(errorMessage, sizeof(errorMessage), "Username must be %d-%d characters!", MIN_USERNAME, MAX_USERNAME - 1);
             } else {
-                isUsernameEntered = true;
+                is_username_entered = true;
                 strcpy(errorMessage, "");
             }
         } else {
@@ -762,12 +790,12 @@ void login_keyboard(unsigned char key, int x, int y) {
                 snprintf(errorMessage, sizeof(errorMessage), "Password must be %d-%d characters!", MIN_PASSWORD, MAX_PASSWORD - 1);
             }
 
-            else if (isRegisterMode) {
-                passwordStrength = evaluate_password_strength(current_password);
+            else if (is_register_mode) {
+                password_strength = evaluate_password_strength(current_password);
                 bool user_exists = find_user(current_username) != -1;
-                if (passwordStrength <= 2) {
+                if (password_strength <= 2) {
                     char feedback[100];
-                    get_password_strength_feedback(passwordStrength, feedback);
+                    get_password_strength_feedback(password_strength, feedback);
                     snprintf(errorMessage, sizeof(errorMessage), "%s", feedback);
                 }
 
@@ -778,8 +806,11 @@ void login_keyboard(unsigned char key, int x, int y) {
                     char hashed_password[SHA256_DIGEST_LENGTH * 2 + 1];
                     hash_password(current_password, hashed_password);
                     register_user(current_username, hashed_password);
-                    isLoginScreen = false;
-                    isFirstGame = true;
+                    is_login_screen = false;
+                    is_first_game = true;
+                    const int index = find_user(current_username);
+                    current_user = &get_users()->users[index];
+
                     start_sokoban();
                 }
             }
@@ -791,15 +822,16 @@ void login_keyboard(unsigned char key, int x, int y) {
                     return;
                 }
 
-                User user = get_users().users[index];
+                User* user = &get_users()->users[index];
                 char hashed_password[SHA256_DIGEST_LENGTH * 2 + 1];
                 hash_password(current_password, hashed_password);
-                if (strcmp(user.password, hashed_password) != 0) {
+                if (strcmp(user->password, hashed_password) != 0) {
                     snprintf(errorMessage, sizeof(errorMessage), "Incorrect password!");
                     return;
                 }
 
-                isLoginScreen = false;
+                current_user = user;
+                is_login_screen = false;
                 start_sokoban();
             }
         }
@@ -807,24 +839,24 @@ void login_keyboard(unsigned char key, int x, int y) {
 
     else if (key == 8) {
         const int password_len = strlen(current_password);
-        if (isUsernameEntered && password_len > 0) {
+        if (is_username_entered && password_len > 0) {
             current_password[password_len - 1] = '\0';
-            passwordStrength = evaluate_password_strength(current_password);
-        } else if (!isUsernameEntered && password_len > 0) {
+            password_strength = evaluate_password_strength(current_password);
+        } else if (!is_username_entered && password_len > 0) {
             current_username[password_len - 1] = '\0';
         }
         strcpy(errorMessage, "");
     } else if (key >= 32 && key <= 126) {
         int username_len = strlen(current_username);
         int password_len = strlen(current_password);
-        if (!isUsernameEntered && username_len < MAX_USERNAME - 1) {
+        if (!is_username_entered && username_len < MAX_USERNAME - 1) {
             current_username[username_len] = key;
             current_username[username_len+1] = '\0';
             strcpy(errorMessage, "");
-        } else if (isUsernameEntered && password_len < MAX_PASSWORD - 1) {
+        } else if (is_username_entered && password_len < MAX_PASSWORD - 1) {
             current_password[password_len] = key;
             current_password[password_len+1] = '\0';
-            passwordStrength = evaluate_password_strength(current_password);
+            password_strength = evaluate_password_strength(current_password);
             strcpy(errorMessage, "");
         }
     }
@@ -832,29 +864,31 @@ void login_keyboard(unsigned char key, int x, int y) {
 
 // Обработчик клавиш для игры
 void keyboard(unsigned char key, int x, int y) {
-    if (currentMode == LOGIN) {
+    if (current_mode == LOGIN) {
         login_keyboard(key, x, y);
-    } else if (currentMode == GAME) {
+    } else if (current_mode == GAME) {
         switch (key) {
             case 'w': case 'W': update_level(0, 1); break;
             case 's': case 'S': update_level(0, -1); break;
             case 'a': case 'A': update_level(-1, 0); break;
             case 'd': case 'D': update_level(1, 0); break;
+            default: ;
         }
     }
 
-    glutPostRedisplay();
+    //timer_redisplay(0);
 }
 
 // Обработчик специальных клавиш
 void special_keys(int key, int x, int y) {
-    if (currentMode == GAME) {
+    if (current_mode == GAME) {
         switch (key) {
             case GLUT_KEY_UP:    update_level(0, 1); break;
             case GLUT_KEY_DOWN:  update_level(0, -1); break;
             case GLUT_KEY_LEFT:  update_level(-1, 0); break;
             case GLUT_KEY_RIGHT: update_level(1, 0); break;
+            default: ;
         }
-        glutPostRedisplay();
+        //timer_redisplay(0);
     }
 }

@@ -4,10 +4,18 @@
 #include <string.h>
 #include <time.h>
 
+#define PROFILE_STACK_MAX 64
+
+typedef struct {
+    const char* name;
+    clock_t start_time;
+} ProfileFrame;
+
+static ProfileFrame profile_stack[PROFILE_STACK_MAX];
+static int stack_count = 0;
+
 static ProfileEntry profile_entries[MAX_PROFILE_ENTRIES];
 static int profile_count = 0;
-
-static clock_t prof_start_time;
 
 static int profile_find(const char* name) {
     for (int index = 0; index < profile_count; index++)
@@ -17,29 +25,44 @@ static int profile_find(const char* name) {
     return -1;
 }
 
-void profile_start() {
-    prof_start_time = clock();
-}
-
-void profile_end(const char* name) {
-    const double elapsed = (double)(clock() - prof_start_time) / CLOCKS_PER_SEC;
-
-    int index = profile_find(name);
-    if (index == -1) {
-        index = profile_count++;
-        profile_entries[index].name = name;
-        profile_entries[index].total_time = 0;
-        profile_entries[index].calls = 0;
+void profile_start(const char* name) {
+    if (stack_count > PROFILE_STACK_MAX) {
+        printf("stack is full\n");
+        return;
     }
 
-    profile_entries[index].total_time += elapsed;
-    profile_entries[index].calls += 1;
+    ProfileFrame* frame = &profile_stack[stack_count++];
+    frame->name = name;
+    frame->start_time = clock();
+}
+
+void profile_end() {
+    if (stack_count <= 0)
+        return;
+
+    const ProfileFrame frame = profile_stack[--stack_count];
+    const double elapsed = (double)(clock() - frame.start_time) / CLOCKS_PER_SEC;
+
+    // Ищем/добавляем запись
+    int idx = profile_find(frame.name);
+    if (idx == -1) {
+        idx = profile_count++;
+        profile_entries[idx].name = frame.name;
+        profile_entries[idx].total_time = 0;
+        profile_entries[idx].calls = 0;
+    }
+
+    profile_entries[idx].total_time += elapsed;
+    profile_entries[idx].calls++;
 }
 
 void profile_print() {
+    while (stack_count > 0)
+        profile_end();
+
     printf("\n=== FRAME PROFILING ===\n");
     for (int i = 0; i < profile_count; i++) {
-        printf("%-25s | total: %8.6f s | calls: %9d | avg: %8.6f ms\n",
+        printf("%-40s | total: %12.6f s | calls: %30d | avg: %12.6f ms\n",
             profile_entries[i].name,
             profile_entries[i].total_time,
             profile_entries[i].calls,

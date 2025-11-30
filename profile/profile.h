@@ -9,8 +9,8 @@ typedef struct ProfileEntry {
     int calls;
 } ProfileEntry;
 
-void profile_start();
-void profile_end(const char* name);
+void profile_start(const char* name);
+void profile_end();
 void profile_print();
 
 #endif //PROFILE_H

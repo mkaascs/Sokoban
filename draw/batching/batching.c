@@ -3,7 +3,7 @@
 
 #include "font.h"
 
-#define BATCH_INITIAL_CAPACITY 512
+#define MAX_VERTICES 65536
 
 typedef struct {
     float x, y;
@@ -13,20 +13,13 @@ typedef struct {
 
 static BatchVertex* untextured_vertices = NULL;
 static int untextured_count = 0;
-static int untextured_capacity = 0;
 
 static BatchVertex* textured_vertices = NULL;
 static int textured_count = 0;
-static int textured_capacity = 0;
-
-static void ensure_capacity(BatchVertex** buf, const int* count, int* cap, int need);
 
 void batch_init(void) {
-    untextured_count = textured_count = 0;
-    untextured_capacity = textured_capacity = 0;
-    untextured_vertices = textured_vertices = NULL;
-    ensure_capacity(&untextured_vertices, &untextured_count, &untextured_capacity, 1);
-    ensure_capacity(&textured_vertices, &textured_count, &textured_capacity, 1);
+    untextured_vertices = malloc(MAX_VERTICES * sizeof(BatchVertex));
+    textured_vertices   = malloc(MAX_VERTICES * sizeof(BatchVertex));
 }
 
 void batch_reset() {
@@ -35,7 +28,6 @@ void batch_reset() {
 }
 
 void batch_add_rect(const float x, const float y, const float w, const float h, const float r, const float g, const float b) {
-    ensure_capacity(&untextured_vertices, &untextured_count, &untextured_capacity, 6);
     const BatchVertex quad[6] = {
         {x,     y,     0, 0, r, g, b, 1},
         {x + w, y,     0, 0, r, g, b, 1},
@@ -50,7 +42,6 @@ void batch_add_rect(const float x, const float y, const float w, const float h, 
 }
 
 void batch_add_textured_quad(float x1, float y1, float x2, float y2, float u1, float v1, float u2, float v2, float r, float g, float b, float a) {
-    ensure_capacity(&textured_vertices, &textured_count, &textured_capacity, 6);
     const BatchVertex quad[6] = {
         {x1, y1, u1, v1, r, g, b, a},
         {x2, y1, u2, v1, r, g, b, a},
@@ -116,17 +107,4 @@ void batch_free(void) {
     free(textured_vertices);
     untextured_vertices = textured_vertices = NULL;
     untextured_count = textured_count = 0;
-    untextured_capacity = textured_capacity = 0;
-}
-
-static void ensure_capacity(BatchVertex** buf, const int* count, int* cap, const int need) {
-    if (*count + need <= *cap) return;
-
-    int new_cap = *cap > 0 ? *cap : BATCH_INITIAL_CAPACITY;
-    while (new_cap < *count + need) new_cap *= 2;
-
-    BatchVertex* new_buf = (BatchVertex*)realloc(*buf, new_cap * sizeof(BatchVertex));
-    if (new_buf == NULL) return;
-    *buf = new_buf;
-    *cap = new_cap;
 }

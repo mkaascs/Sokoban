@@ -14,8 +14,8 @@ typedef struct GameState {
 } GameState;
 
 typedef struct Game {
-    Level level;
-    GameState state;
+    Level* level;
+    GameState* state;
 } Game;
 
 typedef enum EntityType {
@@ -31,8 +31,8 @@ typedef enum EntityType {
 bool start_game(int level);
 bool move_player(int dx, int dy);
 
-Level get_current_level();
-GameState get_game_state();
+const Level* get_current_level();
+const GameState* get_game_state();
 EntityType get_entity_type(int row, int column);
 
 long long get_time_ms();

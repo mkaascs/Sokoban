@@ -8,7 +8,6 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
-#include "../../profile/profile.h"
 
 FontAtlas font_atlas;
 
@@ -115,7 +114,6 @@ bool font_init() {
 }
 
 void draw_text_batch(float x_ndc, float y_ndc, const char* text, float r, float g, float b) {
-    profile_start();
     if (!text || !*text) return;
 
     const int win_w = glutGet(GLUT_WINDOW_WIDTH);
@@ -154,5 +152,4 @@ void draw_text_batch(float x_ndc, float y_ndc, const char* text, float r, float 
         pen_x += glyph->advance;
     }
 
-    profile_end("draw_text_batch()");
 }

@@ -32,7 +32,7 @@ typedef struct UserArray {
 bool load_leaderboard();
 bool save_leaderboard();
 
-UserArray get_users();
+const UserArray* get_users();
 int find_user(const char* username);
 
 bool register_user(const char* username, const char* password);
