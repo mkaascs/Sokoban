@@ -258,11 +258,11 @@ Level* original_levels;
 void levels_init() {
     original_levels = malloc(LEVEL_COUNT * sizeof(Level));
     original_levels[0] = load_tutorial();
-    //original_levels[1] = load_8x8level();
-    //original_levels[2] = load_12x12level();
-    //original_levels[3] = load_16x16level();
-    //original_levels[4] = load_32x32level();
-    original_levels[1] = load_64x64level();
+    original_levels[1] = load_8x8level();
+    original_levels[2] = load_12x12level();
+    original_levels[3] = load_16x16level();
+    original_levels[4] = load_32x32level();
+    original_levels[5] = load_64x64level();
 }
 
 void levels_free() {
