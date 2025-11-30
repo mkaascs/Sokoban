@@ -123,6 +123,7 @@ void start_draw() {
 void exit_game() {
     save_leaderboard();
     free_leaderboard();
+    levels_free();
     batch_free();
     profile_print();
     exit(0);
@@ -316,11 +317,15 @@ void draw_game() {
 
     draw_rectangle(GAME_RECT_X, GAME_RECT_Y, GAME_RECT_WIDTH, GAME_RECT_HEIGHT, 0.999, 0.844, 0.600);
 
-    const float cellWidth = GAME_RECT_WIDTH / COLS;
-    const float cellHeight = GAME_RECT_HEIGHT / ROWS;
+    const Level level = get_current_level();
+    const int rows = level.walls.rows;
+    const int columns = level.walls.columns;
 
-    for (int i = 0; i < ROWS; i++) {
-        for (int j = 0; j < COLS; j++) {
+    const float cellWidth = GAME_RECT_WIDTH / columns;
+    const float cellHeight = GAME_RECT_HEIGHT / rows;
+
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < columns; j++) {
             const float x = GAME_RECT_X + j * cellWidth;
             const float y = GAME_RECT_Y + i * cellHeight;
             draw_cell(x, y, cellWidth, cellHeight, get_entity_type(i, j));
@@ -490,12 +495,16 @@ void draw_tutorial() {
     batch_reset();
     draw_rectangle(GAME_RECT_X, GAME_RECT_Y, GAME_RECT_WIDTH, GAME_RECT_HEIGHT, 0.999, 0.844, 0.600);
 
-    const float cellWidth = GAME_RECT_WIDTH / COLS;
-    const float cellHeight = GAME_RECT_HEIGHT / ROWS;
+    const Level level = get_current_level();
+    const int rows = level.walls.rows;
+    const int columns = level.walls.columns;
+
+    const float cellWidth = GAME_RECT_WIDTH / columns;
+    const float cellHeight = GAME_RECT_HEIGHT / rows;
 
     const GameState state = get_game_state();
-    for (int i = 0; i < ROWS; i++) {
-        for (int j = 0; j < COLS; j++) {
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < columns; j++) {
             const float x = GAME_RECT_X + j * cellWidth;
             const float y = GAME_RECT_Y + i * cellHeight;
             draw_cell(x, y, cellWidth, cellHeight, get_entity_type(i, j));
@@ -720,6 +729,7 @@ void mouse(int button, int state, int x, int y) {
 
 // Запуск игры
 void start_sokoban() {
+    levels_init();
     printf("Запуск игры для пользователя: %s\n", current_username);
     if (isFirstGame) {
         currentMode = TUTORIAL;

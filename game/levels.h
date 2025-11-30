@@ -1,21 +1,23 @@
 #ifndef LEVELS_H
 #define LEVELS_H
 
-#include <stdlib.h>
+#include "bitboard.h"
 
-#define LEVEL_COUNT 11
+#define LEVEL_COUNT 6
 
 // Структура для хранения уровней
 // ОПТИМИЗАЦИЯ: Замена char[][] на uint64_t
 typedef struct Level {
     int number;
 
-    uint64_t walls;
-    uint64_t boxes;
-    uint64_t goals;
-    uint64_t player;
+    BitBoard walls;
+    BitBoard boxes;
+    BitBoard goals;
+    BitBoard player;
 } Level;
 
-extern const Level originalLevels[];
+void levels_init();
+void levels_free();
+Level* get_levels();
 
 #endif //LEVELS_H

@@ -39,7 +39,7 @@ void profile_end(const char* name) {
 void profile_print() {
     printf("\n=== FRAME PROFILING ===\n");
     for (int i = 0; i < profile_count; i++) {
-        printf("%-25s | total: %8.6f s | calls: %4d | avg: %8.6f ms\n",
+        printf("%-25s | total: %8.6f s | calls: %9d | avg: %8.6f ms\n",
             profile_entries[i].name,
             profile_entries[i].total_time,
             profile_entries[i].calls,

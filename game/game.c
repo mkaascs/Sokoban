@@ -1,28 +1,39 @@
 #include <stdlib.h>
-
-#include "game.h"
-
+#include <string.h>
 #include <time.h>
 
+#include "game.h"
 #include "../profile/profile.h"
 
 Game game;
 
-static uint64_t bit(int, int);
-
 bool start_game(const int level) {
     profile_start();
-    game.level.number = level;
-    game.level.boxes = originalLevels[level].boxes;
-    game.level.goals = originalLevels[level].goals;
-    game.level.player = originalLevels[level].player;
-    game.level.walls = originalLevels[level].walls;
 
-    const uint64_t mask = game.level.player;
-    if (mask != 0) {
-        const int index = __builtin_ctzll(mask);
-        game.state.player_x = index % COLS;
-        game.state.player_y = index / COLS;
+    const Level* levels = get_levels();
+    const Level* src = &levels[level];
+
+    bb_free(&game.level.walls);
+    bb_free(&game.level.boxes);
+    bb_free(&game.level.goals);
+    bb_free(&game.level.player);
+
+    bb_init(&game.level.walls,  src->walls.rows,  src->walls.columns);
+    bb_init(&game.level.boxes,  src->boxes.rows,  src->boxes.columns);
+    bb_init(&game.level.goals,  src->goals.rows,  src->goals.columns);
+    bb_init(&game.level.player, src->player.rows, src->player.columns);
+
+    memcpy(game.level.walls.data,  src->walls.data,  src->walls.words * sizeof(uint64_t));
+    memcpy(game.level.boxes.data,  src->boxes.data,  src->boxes.words * sizeof(uint64_t));
+    memcpy(game.level.goals.data,  src->goals.data,  src->goals.words * sizeof(uint64_t));
+    memcpy(game.level.player.data, src->player.data, src->player.words * sizeof(uint64_t));
+
+    game.level.number = level;
+
+    int pr, pc;
+    if (bb_find_first_bit(&game.level.player, &pr, &pc)) {
+        game.state.player_y = pr;
+        game.state.player_x = pc;
     }
 
     else return false;
@@ -30,43 +41,47 @@ bool start_game(const int level) {
     game.state.start_time = get_time_ms();
     game.state.move_count = 0;
     game.state.is_level_completed = false;
-    profile_end("start_game");
+    profile_end("start_game()");
 
     return true;
 }
 
 bool move_player(const int dx, const int dy) {
     profile_start();
+    const int rows = game.level.walls.rows;
+    const int columns = game.level.walls.columns;
+
     const int new_x = game.state.player_x + dx;
     const int new_y = game.state.player_y + dy;
 
-    if (new_x < 0 || new_x >= COLS || new_y < 0 || new_y >= ROWS)
+    if (new_x < 0 || new_x >= columns || new_y < 0 || new_y >= rows)
         return false;
 
-    const uint64_t next_bit = bit(new_y, new_x);
+    bool next_is_wall = bb_get(&game.level.walls, new_y, new_x);
+    const bool next_is_box  = bb_get(&game.level.boxes, new_y, new_x);
 
-    if (game.level.boxes & next_bit) {
+    if (next_is_box) {
         const int box_x = new_x + dx;
         const int box_y = new_y + dy;
 
-        if (box_x < 0 || box_x >= COLS || box_y < 0 || box_y >= ROWS)
+        if (box_x < 0 || box_x >= columns || box_y < 0 || box_y >= rows)
             return false;
 
-        const uint64_t box_next_bit = bit(box_y, box_x);
+        const bool wall_ahead = bb_get(&game.level.walls, box_y, box_x);
+        const bool box_ahead  = bb_get(&game.level.boxes, box_y, box_x);
 
-        if (!(game.level.walls & box_next_bit) && !(game.level.boxes & box_next_bit)) {
-            game.level.boxes &= ~next_bit;
-            game.level.boxes |= box_next_bit;
-        }
+        if (wall_ahead || box_ahead)
+            return false;
 
-        else return false;
+        bb_clear(&game.level.boxes, new_y, new_x);
+        bb_set(&game.level.boxes,   box_y,    box_x);
     }
 
-    if (game.level.walls & next_bit)
+    if (next_is_wall)
         return false;
 
-    game.level.player &= ~bit(game.state.player_y, game.state.player_x);
-    game.level.player |= bit(new_y, new_x);
+    bb_clear(&game.level.player, game.state.player_y, game.state.player_x);
+    bb_set(&game.level.player, new_y, new_x);
 
     game.state.player_x = new_x;
     game.state.player_y = new_y;
@@ -78,8 +93,7 @@ bool move_player(const int dx, const int dy) {
         game.state.end_time = get_time_ms();
     }
 
-    profile_end("move_player");
-
+    profile_end("move_player()");
     return true;
 }
 
@@ -92,22 +106,31 @@ GameState get_game_state() {
 }
 
 bool check_win() {
-    return (game.level.boxes & game.level.goals) == game.level.goals
-        || (game.level.boxes & ~game.level.goals) == 0;
+    for (int i = 0; i < game.level.boxes.words; i++) {
+        const uint64_t boxes = game.level.boxes.data[i];
+        const uint64_t goals = game.level.goals.data[i];
+
+        if (boxes & ~goals)
+            return false;
+    }
+
+    return true;
 }
 
 EntityType get_entity_type(const int row, const int column) {
-    const uint64_t b = bit(row, column);
+    if (row < 0 || row >= game.level.walls.rows || column < 0 || column >= game.level.walls.columns)
+        return ENTITY_NONE;
 
-    if (game.level.walls & b) return ENTITY_WALL;
-    if (game.level.player & b) return game.level.goals & b ? ENTITY_PLAYER_ON_GOAL : ENTITY_PLAYER;
-    if (game.level.boxes & b)  return game.level.goals & b ? ENTITY_BOX_ON_GOAL : ENTITY_BOX;
-    if (game.level.goals & b) return ENTITY_GOAL;
+    const bool is_wall  = bb_get(&game.level.walls,  row, column);
+    const bool is_player= bb_get(&game.level.player,row, column);
+    const bool is_box   = bb_get(&game.level.boxes,  row, column);
+    const bool is_goal  = bb_get(&game.level.goals,  row, column);
+
+    if (is_wall) return ENTITY_WALL;
+    if (is_player) return is_goal ? ENTITY_PLAYER_ON_GOAL : ENTITY_PLAYER;
+    if (is_box)    return is_goal ? ENTITY_BOX_ON_GOAL    : ENTITY_BOX;
+    if (is_goal)   return ENTITY_GOAL;
     return ENTITY_NONE;
-}
-
-uint64_t bit(const int row, const int column) {
-    return 1ULL << row * COLS + column;
 }
 
 long long get_time_ms() {

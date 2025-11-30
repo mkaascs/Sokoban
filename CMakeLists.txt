@@ -55,7 +55,9 @@ add_executable(sokoban main.c
         profile/profile.h
         profile/profile.c
         draw/batching/font.h
-        draw/batching/font.c)
+        draw/batching/font.c
+        game/bitboard.h
+        game/bitboard.c)
 
 # Машинно-зависимая оптимизация
 target_compile_options(sokoban PRIVATE -O3 -march=native -flto -ffast-math)

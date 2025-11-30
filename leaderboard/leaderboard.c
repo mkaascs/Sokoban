@@ -49,7 +49,6 @@ bool load_leaderboard() {
 
         User parsed_user;
         parse_plain_text(plain_text, &parsed_user);
-        printf("%s\n", parsed_user.username);
         add_user(parsed_user);
     }
 

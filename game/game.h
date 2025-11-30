@@ -5,9 +5,6 @@
 
 #include <stdbool.h>
 
-#define ROWS 8
-#define COLS 8
-
 typedef struct GameState {
     long long start_time;
     long long end_time;
