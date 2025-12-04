@@ -4,6 +4,9 @@
 
 #include "game.h"
 
+#include "../profile/profile.h"
+#include "bot/bot.h"
+
 Game game = {0};
 
 bool start_game(const int level) {

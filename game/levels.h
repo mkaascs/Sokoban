@@ -3,7 +3,7 @@
 
 #include "bitboard.h"
 
-#define LEVEL_COUNT 6
+#define LEVEL_COUNT 10
 
 // Структура для хранения уровней
 // ОПТИМИЗАЦИЯ: Замена char[][] на uint64_t

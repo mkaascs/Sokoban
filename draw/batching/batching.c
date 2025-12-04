@@ -3,7 +3,7 @@
 
 #include "font.h"
 
-#define MAX_VERTICES 65536
+#define MAX_VERTICES 1024*INT16_MAX
 
 typedef struct {
     float x, y;

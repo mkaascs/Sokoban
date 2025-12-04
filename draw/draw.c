@@ -2,6 +2,7 @@
 
 #include "../game/game.h"
 #include "../game/levels.h"
+#include "../game/bot/bot.h"
 #include "../leaderboard/crypto.h"
 #include "../profile/profile.h"
 
@@ -33,6 +34,8 @@
 
 #define BUTTON_WIDTH 0.3
 #define BUTTON_HEIGHT 0.1
+#define BOT_BUTTON_X MENU_RECT_X + 0.05
+#define BOT_BUTTON_Y MENU_RECT_Y + 1.05
 #define NEXT_BUTTON_X MENU_RECT_X + 0.05
 #define NEXT_BUTTON_Y MENU_RECT_Y + 0.85
 #define PREV_BUTTON_X MENU_RECT_X + 0.05
@@ -93,6 +96,10 @@ int password_strength = 0;
 DisplayMode current_mode = LOGIN;
 User* current_user = NULL;
 
+static char* bot_path = NULL;
+static int bot_step = 0;
+static bool bot_running = false;
+
 void draw();
 void reshape(int width, int height);
 void mouse(int button, int state, int x, int y);
@@ -130,15 +137,10 @@ void start_draw() {
 }
 
 void exit_game() {
-    printf("save_leaderboard()");
     save_leaderboard();
-    printf("free_leaderboard()");
     free_leaderboard();
-    printf("levels_free()");
     levels_free();
-    printf("batch_free()");
     batch_free();
-    printf("profile_print()");
     profile_print();
     exit(0);
 }
@@ -153,13 +155,6 @@ void draw_text(float x_ndc, float y_ndc, const char* text, float r, float g, flo
     profile_start("draw_text()");
     draw_text_batch(x_ndc,y_ndc,text,r,g,b);
     profile_end();
-}
-
-bool start_game_prf(const int level) {
-    profile_start("start_game()");
-    bool result = start_game(level);
-    profile_end();
-    return result;
 }
 
 bool move_player_prf(const int dx, const int dy) {
@@ -301,21 +296,64 @@ void update_level(const int dx, const int dy) {
 
         current_user->total_score = recalculate_total_score(*current_user);
         update_score(current_username, current_user->total_score);
-        printf("Очки за уровень %d: %.2f, Общие очки: %.2f\n",
-               level->number, level_score, current_user->total_score);
     }
 
     current_user->completed_levels |= 1u << level->number;
 
     profile_end();
-    //timer_redisplay(0);
+}
+
+void bot_play_step(int value) {
+    if (!bot_running || !bot_path) return;
+
+    char move = bot_path[bot_step++];
+
+    switch (move) {
+        case 'u': case 'U': update_level(0, 1); break;
+        case 'd': case 'D': update_level(0, -1); break;
+        case 'l': case 'L': update_level(-1, 0); break;
+        case 'r': case 'R': update_level(1, 0); break;
+        default: ;
+    }
+
+    const GameState* state = get_game_state();
+    if (state->is_level_completed || bot_path[bot_step] == '\0') {
+        bot_running = false;
+        bot_step = 0;
+        free(bot_path);
+        bot_path = NULL;
+        return;
+    }
+
+    glutTimerFunc(250, bot_play_step, 0);
+}
+
+void start_bot() {
+    if (bot_running) return;
+
+    profile_start("solve_path()");
+    char* path = solve_astar(get_current_level());
+    profile_end();
+
+    if (!path) return;
+
+    bot_path = path;
+    bot_running = true;
+
+    glutTimerFunc(500, bot_play_step, 0);
+}
+
+bool start_game_prf(const int level) {
+    profile_start("start_game()");
+    bool result = start_game(level);
+    profile_end();
+    return result;
 }
 
 // Отрисовка меню игры
-void draw_menu() {
-    batch_reset();
-
+void batch_menu() {
     draw_rectangle(MENU_RECT_X, MENU_RECT_Y, MENU_RECT_WIDTH, MENU_RECT_HEIGHT, 0.0, 0.0, 0.0);
+    draw_rectangle(BOT_BUTTON_X, BOT_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
     draw_rectangle(NEXT_BUTTON_X, NEXT_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
     draw_rectangle(PREV_BUTTON_X, PREV_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
     draw_rectangle(LEVEL_BUTTON_X, LEVEL_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
@@ -324,6 +362,7 @@ void draw_menu() {
     draw_rectangle(CONTROLS_BUTTON_X, CONTROLS_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
     draw_rectangle(QUIT_BUTTON_X, QUIT_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 0.5, 0.5, 0.5);
 
+    draw_text(BOT_BUTTON_X + 0.05, BOT_BUTTON_Y + 0.05, "Start Bot", 1.0, 1.0, 1.0);
     draw_text(NEXT_BUTTON_X + 0.05, NEXT_BUTTON_Y + 0.05, "Next Level", 1.0, 1.0, 1.0);
     draw_text(PREV_BUTTON_X + 0.05, PREV_BUTTON_Y + 0.05, "Previous Level", 1.0, 1.0, 1.0);
     draw_text(LEVEL_BUTTON_X + 0.05, LEVEL_BUTTON_Y + 0.05, "Choose Level", 1.0, 1.0, 1.0);
@@ -331,8 +370,6 @@ void draw_menu() {
     draw_text(LEADERBOARD_BUTTON_X + 0.05, LEADERBOARD_BUTTON_Y + 0.05, "Leaderboard", 1.0, 1.0, 1.0);
     draw_text(CONTROLS_BUTTON_X + 0.05, CONTROLS_BUTTON_Y + 0.05, "Controls", 1.0, 1.0, 1.0);
     draw_text(QUIT_BUTTON_X + 0.05, QUIT_BUTTON_Y + 0.05, "Quit", 1.0, 1.0, 1.0);
-
-    batch_flush();
 }
 
 // Отрисовка игры
@@ -390,9 +427,10 @@ void draw_game() {
     }
 
     draw_text(0.6, 0.8, current_username, 1.0, 1.0, 0.0);
+
+    batch_menu();
     batch_flush();
 
-    draw_menu();
     glutSwapBuffers();
 }
 
@@ -433,7 +471,7 @@ void draw_login() {
 
     draw_text(-0.4, 0.4, is_register_mode ? "Register" : "Login", 1.0, 1.0, 1.0);
     draw_text(-0.4, 0.2, "ENTER YOUR USERNAME (just enter):", 1.0, 1.0, 1.0);
-    draw_text(-0.1, 0.2, current_username, 1.0, 1.0, 1.0);
+    draw_text(-0.1, 0.1, current_username, 1.0, 1.0, 1.0);
     draw_text(-0.4, 0.0, is_username_entered ? "ENTER YOUR PASSWORD (just enter):" : "", 1.0, 1.0, 1.0);
 
     draw_text(TOGGLE_BUTTON_X + 0.05, TOGGLE_BUTTON_Y + 0.05, "Toggle Mode", 1.0, 1.0, 1.0);
@@ -445,7 +483,7 @@ void draw_login() {
     const int password_len = strlen(current_password);
     memset(maskedPassword, '*', password_len);
     maskedPassword[password_len] = '\0';
-    draw_text(-0.1, 0.0, is_username_entered ? maskedPassword : "", 1.0, 1.0, 1.0);
+    draw_text(-0.1, -0.1, is_username_entered ? maskedPassword : "", 1.0, 1.0, 1.0);
 
     if (strlen(errorMessage) > 0) {
         draw_text(-0.4, -0.5, errorMessage, 1.0, 0.0, 0.0);
@@ -466,7 +504,7 @@ void draw_level_selector() {
 
     batch_reset();
 
-    for (int i = 0; i < LEVEL_COUNT - 1; i++) {
+    for (int i = 0; i < LEVEL_COUNT; i++) {
         float x = LEVEL_SELECT_BASE_X + (i % 5) * (LEVEL_SELECT_BUTTON_WIDTH + 0.05);
         float y = LEVEL_SELECT_BASE_Y - (i / 5) * (LEVEL_SELECT_BUTTON_HEIGHT + 0.05);
         draw_rectangle(x, y, LEVEL_SELECT_BUTTON_WIDTH, LEVEL_SELECT_BUTTON_HEIGHT, 0.5, 0.5, 0.5);
@@ -572,7 +610,6 @@ void update_tutorial_animation() {
         current_mode = GAME;
         is_first_game = false;
         start_game_prf(1);
-        //timer_redisplay(0);
         return;
     }
 
@@ -585,7 +622,6 @@ void update_tutorial_animation() {
         default: ;
     }
 
-    //timer_redisplay(0);
     glutTimerFunc(1500, update_tutorial_animation, 0);
 }
 
@@ -699,8 +735,13 @@ void mouse(int button, int state, int x, int y) {
         }
 
         else if (current_mode == GAME) {
+            if (glX >= BOT_BUTTON_X && glX <= BOT_BUTTON_X + BUTTON_WIDTH &&
+                glY >= BOT_BUTTON_Y && glY <= BOT_BUTTON_Y + BUTTON_HEIGHT) {
+                start_bot();
+                }
+
             if (glX >= NEXT_BUTTON_X && glX <= NEXT_BUTTON_X + BUTTON_WIDTH &&
-                glY >= NEXT_BUTTON_Y && glY <= NEXT_BUTTON_Y + BUTTON_HEIGHT && level->number < LEVEL_COUNT - 1) {
+                glY >= NEXT_BUTTON_Y && glY <= NEXT_BUTTON_Y + BUTTON_HEIGHT && level->number < LEVEL_COUNT) {
                 start_game_prf(level->number + 1);
             }
             else if (glX >= PREV_BUTTON_X && glX <= PREV_BUTTON_X + BUTTON_WIDTH &&
@@ -754,7 +795,6 @@ void mouse(int button, int state, int x, int y) {
             }
         }
 
-        //timer_redisplay(0);
     }
 }
 
@@ -770,7 +810,6 @@ void start_sokoban() {
         current_mode = GAME;
         start_game_prf(1);
     }
-    //timer_redisplay(0);
 }
 
 // Обработчик клавиш для авторизации
@@ -866,7 +905,7 @@ void login_keyboard(unsigned char key, int x, int y) {
 void keyboard(unsigned char key, int x, int y) {
     if (current_mode == LOGIN) {
         login_keyboard(key, x, y);
-    } else if (current_mode == GAME) {
+    } else if (current_mode == GAME && !bot_running && !get_game_state()->is_level_completed) {
         switch (key) {
             case 'w': case 'W': update_level(0, 1); break;
             case 's': case 'S': update_level(0, -1); break;
@@ -876,7 +915,6 @@ void keyboard(unsigned char key, int x, int y) {
         }
     }
 
-    //timer_redisplay(0);
 }
 
 // Обработчик специальных клавиш
@@ -889,6 +927,5 @@ void special_keys(int key, int x, int y) {
             case GLUT_KEY_RIGHT: update_level(1, 0); break;
             default: ;
         }
-        //timer_redisplay(0);
     }
 }
