@@ -36,7 +36,7 @@ Level load_tutorial() {
     return level;
 }
 
-static const char* level_templates[LEVEL_COUNT][8] = {
+static const char* level_templates[LEVEL_COUNT - 1][8] = {
     {"########", "#      #", "# @ $  #", "#   .  #", "#      #", "#      #", "#      #", "########"},
     {"########", "#      #", "# @ $  #", "#  $ . #", "#   .  #", "#      #", "#      #", "########"},
     {"########", "#      #", "# @ $. #", "#   $  #", "# .  . #", "#    $ #", "#      #", "########"},
@@ -68,8 +68,8 @@ Level load_8x8level_from_template(int index) {
 void levels_init() {
     original_levels = malloc(LEVEL_COUNT * sizeof(Level));
     original_levels[0] = load_tutorial();
-    for (int index = 0; index < LEVEL_COUNT - 1; index++) {
-        original_levels[index + 1] = load_8x8level_from_template(index);
+    for (int index = 1; index < LEVEL_COUNT; index++) {
+        original_levels[index] = load_8x8level_from_template(index - 1);
     }
 }
 

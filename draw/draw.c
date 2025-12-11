@@ -282,10 +282,6 @@ void update_level(const int dx, const int dy) {
     float time_taken = state->end_time - state->start_time / 1000;
     time_taken = time_taken < 1 ? 1 : time_taken;
 
-    const float level_score =
-        (100.0 / 8 * level->walls.columns / (float)state->move_count +
-        100.0 / 8 * level->walls.columns / time_taken) * (level->number + 1);
-
     bool need_update = (current_user->completed_levels & 1u << level->number) == 0
         || state->move_count < current_user->level_moves[level->number]
         || (state->move_count == current_user->level_moves[level->number] && time_taken < current_user->level_times[level->number]);
@@ -504,7 +500,7 @@ void draw_level_selector() {
 
     batch_reset();
 
-    for (int i = 0; i < LEVEL_COUNT; i++) {
+    for (int i = 0; i < LEVEL_COUNT - 1; i++) {
         float x = LEVEL_SELECT_BASE_X + (i % 5) * (LEVEL_SELECT_BUTTON_WIDTH + 0.05);
         float y = LEVEL_SELECT_BASE_Y - (i / 5) * (LEVEL_SELECT_BUTTON_HEIGHT + 0.05);
         draw_rectangle(x, y, LEVEL_SELECT_BUTTON_WIDTH, LEVEL_SELECT_BUTTON_HEIGHT, 0.5, 0.5, 0.5);
@@ -741,7 +737,7 @@ void mouse(int button, int state, int x, int y) {
                 }
 
             if (glX >= NEXT_BUTTON_X && glX <= NEXT_BUTTON_X + BUTTON_WIDTH &&
-                glY >= NEXT_BUTTON_Y && glY <= NEXT_BUTTON_Y + BUTTON_HEIGHT && level->number < LEVEL_COUNT) {
+                glY >= NEXT_BUTTON_Y && glY <= NEXT_BUTTON_Y + BUTTON_HEIGHT && level->number < LEVEL_COUNT - 1) {
                 start_game_prf(level->number + 1);
             }
             else if (glX >= PREV_BUTTON_X && glX <= PREV_BUTTON_X + BUTTON_WIDTH &&
